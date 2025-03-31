@@ -28,29 +28,72 @@
         overflow-y: auto;
         border-right: 1px solid #ccc;
       }
+      /* Zorg dat knoppen en select-elementen geen extra margin-bottom hebben */
       #sidebar button,
-      #sidebar select {
-        margin-bottom: 10px;
+      #sidebar select,
+      #sidebar input {
+        margin-bottom: 0;
+      }
+      /* Voeg een zoekveld toe in de sidebar */
+      #sidebar label {
+        display: block;
+        margin-top: 10px;
+        margin-bottom: 2px;
+      }
+      #sidebar input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 4px;
+        margin-bottom: 5px;
+      }
+      /* Plaats de algemene knop voor ZIP-download in de sidebar */
+      #downloadAll {
+        width: 100%;
+        margin-top: 5px;
+        margin-bottom: 5px;
       }
       #sidebar ul {
         list-style: none;
         padding: 0;
         margin: 0;
       }
+      /* Elk li-blok krijgt een onderlijn en wat ruimte */
       #sidebar li {
-        padding: 5px;
         border-bottom: 1px solid #ddd;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
+        margin-bottom: 5px;
+        padding: 5px;
       }
-      #sidebar li span {
-        flex: 1;
-      }
+      /* De actieve pagina krijgt een lichtgrijze achtergrond */
       #sidebar li.active {
         background: #ddd;
         font-weight: bold;
       }
+      /* Titel + (optioneel) categorie staan in één blok; de acties op een nieuwe regel */
+      .page-title {
+        cursor: pointer;
+        margin-bottom: 5px;
+      }
+      /* Zorg dat de categorienaam cursief is en niet vet */
+      .page-title em {
+        font-style: italic;
+        font-weight: normal;
+      }
+      .action-buttons-row {
+        display: flex;
+        gap: 5px;
+      }
+      .action-buttons-row button {
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        font-size: 16px;
+        padding: 2px 4px;
+      }
+      .action-buttons-row button:hover {
+        background-color: #e0e0e0;
+        border-radius: 3px;
+      }
+
       /* Main editor area */
       #main {
         flex: 1;
@@ -84,7 +127,7 @@
     </style>
   </head>
   <body>
-    <!-- Linker zijbalk -->
+    <!-- Sidebar -->
     <div id="sidebar">
       <button id="newPage">Nieuwe pagina</button>
       <button id="uploadPagesBtn">Upload pagina(s)</button>
@@ -96,11 +139,14 @@
         style="display: none"
         accept=".md"
       />
-      <br />
+      <!-- Algemene functie: download alle pagina's als ZIP -->
+      <button id="downloadAll">Download Alle Pagina’s</button>
       <label for="filterSelect">Filter op categorie:</label>
       <select id="filterSelect">
         <option value="Alle">Alle</option>
       </select>
+      <label for="searchInput">Zoeken:</label>
+      <input type="text" id="searchInput" placeholder="Zoek op titel..." />
       <ul id="pageList"></ul>
     </div>
 
@@ -110,7 +156,6 @@
         <button id="editMode">Bewerken</button>
         <button id="previewMode">Voorbeeld</button>
         <button id="download">Download Pagina</button>
-        <button id="downloadAll">Download Alle Pagina’s</button>
         <label for="categoryInput">Categorie:</label>
         <input type="text" id="categoryInput" placeholder="Categorie" />
       </div>
@@ -137,6 +182,25 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.0/jszip.min.js"></script>
 
     <script>
+      // Globale variabele voor de huidige view: "edit" of "preview"
+      let currentView = "edit";
+
+      // Functie die de view (bewerken/voorbeeld) toepast op de huidige pagina
+      function updateView() {
+        if (currentView === "preview") {
+          saveCurrentPage();
+          const content = cmEditor.getValue();
+          previewDiv.innerHTML = marked.parse(content);
+          previewDiv.style.display = "block";
+          editorContainer.style.display = "none";
+          hljs.highlightAll();
+        } else {
+          previewDiv.style.display = "none";
+          editorContainer.style.display = "block";
+          cmEditor.refresh();
+        }
+      }
+
       // Configureer marked om highlight.js te gebruiken voor codeblokken
       marked.setOptions({
         highlight: function (code, lang) {
@@ -153,8 +217,10 @@
 
       const pageList = document.getElementById("pageList");
       const filterSelect = document.getElementById("filterSelect");
+      const searchInput = document.getElementById("searchInput");
       const categoryInput = document.getElementById("categoryInput");
       const previewDiv = document.getElementById("preview");
+      const editorContainer = document.getElementById("editorContainer");
 
       // Maak CodeMirror aan in plaats van een gewone textarea
       let cmEditor = CodeMirror.fromTextArea(
@@ -174,7 +240,6 @@
       // Slaat de inhoud en de categorie van de huidige pagina op
       function saveCurrentPage() {
         if (!currentPageId) {
-          // Maak een nieuwe standaardpagina als er nog geen huidige pagina is
           let defaultTitle = "Naamloos";
           let counter = 1;
           while (pages.find((p) => p.title === defaultTitle)) {
@@ -199,10 +264,10 @@
         savePages();
       }
 
-      // Update de filter (dropdown) en de zijbalk
+      // Update de filter en de zijbalk
       function updatePageList() {
-        // Update filterSelect-opties
         const currentFilter = filterSelect.value || "Alle";
+        const searchQuery = searchInput.value.toLowerCase();
         let categories = new Set();
         pages.forEach((page) => {
           let cat = page.category.trim();
@@ -226,32 +291,42 @@
         // Update de lijst in de sidebar
         pageList.innerHTML = "";
         pages.forEach((page, index) => {
+          // Filter op categorie
           let pageCat = page.category.trim() || "Ongecategoriseerd";
-          if (filterSelect.value !== "Alle" && pageCat !== filterSelect.value)
+          if (currentFilter !== "Alle" && pageCat !== currentFilter) return;
+          // Filter op zoekterm in de titel
+          if (searchQuery && !page.title.toLowerCase().includes(searchQuery))
             return;
 
           const li = document.createElement("li");
           if (page.id === currentPageId) li.classList.add("active");
 
-          // Titel en categorie (klikbaar)
-          const span = document.createElement("span");
-          span.textContent = page.title + " (" + pageCat + ")";
-          span.style.cursor = "pointer";
-          span.addEventListener("click", () => {
+          // Als er geen specifieke categorie gefilterd wordt, tonen we de categorienaam
+          let showCategory = currentFilter === "Alle";
+
+          const titleDiv = document.createElement("div");
+          titleDiv.className = "page-title";
+          titleDiv.innerHTML = showCategory
+            ? `${page.title} (<em>${pageCat}</em>)`
+            : page.title;
+          titleDiv.addEventListener("click", () => {
             saveCurrentPage();
             currentPageId = page.id;
             cmEditor.setValue(page.content);
             categoryInput.value = page.category;
             updatePageList();
+            updateView();
           });
-          li.appendChild(span);
+          li.appendChild(titleDiv);
 
-          // Actieknoppen
+          // Actieknoppen op een aparte regel
           const actionsDiv = document.createElement("div");
+          actionsDiv.className = "action-buttons-row";
 
-          // Hernoemen
+          // Hernoemen (✏️)
           const renameBtn = document.createElement("button");
-          renameBtn.textContent = "Hernoemen";
+          renameBtn.innerHTML = "✏️";
+          renameBtn.title = "Hernoemen";
           renameBtn.addEventListener("click", () => {
             let newTitle = prompt("Nieuwe titel:", page.title);
             if (newTitle) {
@@ -262,9 +337,10 @@
           });
           actionsDiv.appendChild(renameBtn);
 
-          // Verwijderen
+          // Verwijderen (🗑️)
           const deleteBtn = document.createElement("button");
-          deleteBtn.textContent = "Verwijderen";
+          deleteBtn.innerHTML = "🗑️";
+          deleteBtn.title = "Verwijderen";
           deleteBtn.addEventListener("click", () => {
             if (confirm("Weet je zeker dat je deze pagina wilt verwijderen?")) {
               pages.splice(index, 1);
@@ -281,13 +357,15 @@
               }
               savePages();
               updatePageList();
+              updateView();
             }
           });
           actionsDiv.appendChild(deleteBtn);
 
-          // Omhoog (herordenen)
+          // Omhoog (🔼)
           const upBtn = document.createElement("button");
-          upBtn.textContent = "Omhoog";
+          upBtn.innerHTML = "🔼";
+          upBtn.title = "Omhoog";
           upBtn.addEventListener("click", () => {
             if (index > 0) {
               [pages[index], pages[index - 1]] = [
@@ -298,11 +376,15 @@
               updatePageList();
             }
           });
+          if (index === 0) {
+            upBtn.style.visibility = "hidden";
+          }
           actionsDiv.appendChild(upBtn);
 
-          // Omlaag (herordenen)
+          // Omlaag (🔽)
           const downBtn = document.createElement("button");
-          downBtn.textContent = "Omlaag";
+          downBtn.innerHTML = "🔽";
+          downBtn.title = "Omlaag";
           downBtn.addEventListener("click", () => {
             if (index < pages.length - 1) {
               [pages[index], pages[index + 1]] = [
@@ -313,6 +395,9 @@
               updatePageList();
             }
           });
+          if (index === pages.length - 1) {
+            downBtn.style.visibility = "hidden";
+          }
           actionsDiv.appendChild(downBtn);
 
           li.appendChild(actionsDiv);
@@ -320,8 +405,9 @@
         });
       }
 
-      // Eventlistener op de filter-selectie
+      // Eventlisteners voor filtering
       filterSelect.addEventListener("change", updatePageList);
+      searchInput.addEventListener("input", updatePageList);
 
       // Nieuwe pagina aanmaken
       document.getElementById("newPage").addEventListener("click", () => {
@@ -343,6 +429,7 @@
             categoryInput.value = "";
             updatePageList();
             savePages();
+            updateView();
           }
         }
       });
@@ -364,9 +451,7 @@
             const reader = new FileReader();
             reader.onload = function (e) {
               let content = e.target.result;
-              // Gebruik de bestandsnaam zonder .md-extensie als titel
               let title = file.name.replace(/\.md$/i, "");
-              // Als de titel al bestaat, pas hem dan aan
               let originalTitle = title;
               let counter = 1;
               while (pages.find((p) => p.title === title)) {
@@ -380,7 +465,6 @@
                 category: "",
               };
               pages.push(newPage);
-              // Als er nog geen actieve pagina is, selecteer deze dan
               if (!currentPageId) {
                 currentPageId = newPage.id;
                 cmEditor.setValue(newPage.content);
@@ -391,24 +475,17 @@
             };
             reader.readAsText(file);
           });
-          // Reset de file input zodat dezelfde bestanden later opnieuw gekozen kunnen worden
           event.target.value = "";
         });
 
-      // Wisselen tussen bewerken en voorbeeldmodus
+      // Wisselen tussen bewerken en voorbeeldmodus (toolbar)
       document.getElementById("editMode").addEventListener("click", () => {
-        previewDiv.style.display = "none";
-        document.getElementById("editorContainer").style.display = "block";
-        cmEditor.refresh();
+        currentView = "edit";
+        updateView();
       });
-
       document.getElementById("previewMode").addEventListener("click", () => {
-        saveCurrentPage();
-        const content = cmEditor.getValue();
-        previewDiv.innerHTML = marked.parse(content);
-        previewDiv.style.display = "block";
-        document.getElementById("editorContainer").style.display = "none";
-        hljs.highlightAll();
+        currentView = "preview";
+        updateView();
       });
 
       // Download de huidige pagina als markdown-bestand
@@ -426,7 +503,7 @@
         }
       });
 
-      // Download alle pagina's als ZIP-bestand
+      // Download alle pagina's als ZIP-bestand (sidebar-knop)
       document.getElementById("downloadAll").addEventListener("click", () => {
         saveCurrentPage();
         const zip = new JSZip();
@@ -461,7 +538,6 @@
         cmEditor.setValue(pages[0].content);
         categoryInput.value = pages[0].category;
       } else {
-        // Maak een standaardpagina aan
         currentPageId = Date.now() + Math.random();
         const defaultPage = {
           id: currentPageId,
@@ -473,6 +549,7 @@
         savePages();
       }
       updatePageList();
+      updateView();
     </script>
   </body>
 </html>
