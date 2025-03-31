@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Markdown Editor met Volledige Pagina Beheer</title>
+    <!-- Syntax highlighting CSS voor preview via highlight.js -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/default.min.css"
+    />
+    <!-- CodeMirror CSS -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.7/codemirror.min.css"
+    />
+    <style>
+      body {
+        display: flex;
+        margin: 0;
+        height: 100vh;
+        font-family: Arial, sans-serif;
+      }
+      /* Sidebar */
+      #sidebar {
+        width: 250px;
+        background: #f0f0f0;
+        padding: 10px;
+        overflow-y: auto;
+        border-right: 1px solid #ccc;
+      }
+      #sidebar button,
+      #sidebar select {
+        margin-bottom: 10px;
+      }
+      #sidebar ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      #sidebar li {
+        padding: 5px;
+        border-bottom: 1px solid #ddd;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      #sidebar li span {
+        flex: 1;
+      }
+      #sidebar li.active {
+        background: #ddd;
+        font-weight: bold;
+      }
+      /* Main editor area */
+      #main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 10px;
+      }
+      #toolbar {
+        margin-bottom: 10px;
+      }
+      #toolbar button,
+      #toolbar input {
+        margin-right: 10px;
+      }
+      /* Editor & preview containers */
+      #editorContainer,
+      #preview {
+        flex: 1;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .CodeMirror {
+        height: 100%;
+      }
+      #preview {
+        border: 1px solid #ccc;
+        padding: 10px;
+        overflow-y: auto;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Linker zijbalk -->
+    <div id="sidebar">
+      <button id="newPage">Nieuwe pagina</button>
+      <button id="uploadPagesBtn">Upload pagina(s)</button>
+      <!-- Verborgen file input voor upload -->
+      <input
+        type="file"
+        id="uploadPagesInput"
+        multiple
+        style="display: none"
+        accept=".md"
+      />
+      <br />
+      <label for="filterSelect">Filter op categorie:</label>
+      <select id="filterSelect">
+        <option value="All">All</option>
+      </select>
+      <ul id="pageList"></ul>
+    </div>
+
+    <!-- Hoofdgedeelte -->
+    <div id="main">
+      <div id="toolbar">
+        <button id="editMode">Bewerken</button>
+        <button id="previewMode">Voorbeeld</button>
+        <button id="download">Download Pagina</button>
+        <button id="downloadAll">Download Alle Pagina’s</button>
+        <label for="categoryInput">Categorie:</label>
+        <input type="text" id="categoryInput" placeholder="Categorie" />
+      </div>
+      <!-- Container voor CodeMirror -->
+      <div id="editorContainer">
+        <textarea
+          id="editor"
+          placeholder="Schrijf hier je markdown..."
+        ></textarea>
+      </div>
+      <div id="preview"></div>
+    </div>
+
+    <!-- Externe bibliotheken -->
+    <!-- marked.js voor markdown parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <!-- highlight.js voor syntax highlighting in de preview -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.7/codemirror.min.js"></script>
+    <!-- CodeMirror Markdown mode -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.7/mode/markdown/markdown.min.js"></script>
+    <!-- JSZip voor ZIP-download -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.0/jszip.min.js"></script>
+
+    <script>
+      // Configureer marked om highlight.js te gebruiken voor codeblokken
+      marked.setOptions({
+        highlight: function (code, lang) {
+          if (lang && hljs.getLanguage(lang)) {
+            return hljs.highlight(code, { language: lang }).value;
+          }
+          return hljs.highlightAuto(code).value;
+        },
+      });
+
+      // Data-opslag: array van pagina-objecten (id, title, content, category)
+      let pages = JSON.parse(localStorage.getItem("pages")) || [];
+      let currentPageId = null;
+
+      const pageList = document.getElementById("pageList");
+      const filterSelect = document.getElementById("filterSelect");
+      const categoryInput = document.getElementById("categoryInput");
+      const previewDiv = document.getElementById("preview");
+
+      // Maak CodeMirror aan in plaats van een gewone textarea
+      let cmEditor = CodeMirror.fromTextArea(
+        document.getElementById("editor"),
+        {
+          mode: "markdown",
+          lineNumbers: true,
+          lineWrapping: true,
+        }
+      );
+
+      // Sla de pagina’s op in localStorage
+      function savePages() {
+        localStorage.setItem("pages", JSON.stringify(pages));
+      }
+
+      // Slaat de inhoud en de categorie van de huidige pagina op
+      function saveCurrentPage() {
+        if (!currentPageId) {
+          // Maak een nieuwe standaardpagina als er nog geen huidige pagina is
+          let defaultTitle = "Untitled";
+          let counter = 1;
+          while (pages.find((p) => p.title === defaultTitle)) {
+            defaultTitle = "Untitled" + counter;
+            counter++;
+          }
+          const newPage = {
+            id: Date.now() + Math.random(),
+            title: defaultTitle,
+            content: cmEditor.getValue(),
+            category: categoryInput.value || "",
+          };
+          pages.push(newPage);
+          currentPageId = newPage.id;
+        } else {
+          const page = pages.find((p) => p.id === currentPageId);
+          if (page) {
+            page.content = cmEditor.getValue();
+            page.category = categoryInput.value;
+          }
+        }
+        savePages();
+      }
+
+      // Update de filter (dropdown) en de zijbalk
+      function updatePageList() {
+        // Update filterSelect-opties
+        const currentFilter = filterSelect.value || "All";
+        let categories = new Set();
+        pages.forEach((page) => {
+          let cat = page.category.trim();
+          if (cat === "") cat = "Uncategorized";
+          categories.add(cat);
+        });
+        filterSelect.innerHTML = "";
+        const allOpt = document.createElement("option");
+        allOpt.value = "All";
+        allOpt.textContent = "All";
+        filterSelect.appendChild(allOpt);
+        categories.forEach((cat) => {
+          const opt = document.createElement("option");
+          opt.value = cat;
+          opt.textContent = cat;
+          filterSelect.appendChild(opt);
+        });
+        // Herstel de vorige selectie
+        filterSelect.value = currentFilter;
+
+        // Update de lijst in de sidebar
+        pageList.innerHTML = "";
+        pages.forEach((page, index) => {
+          let pageCat = page.category.trim() || "Uncategorized";
+          if (filterSelect.value !== "All" && pageCat !== filterSelect.value)
+            return;
+
+          const li = document.createElement("li");
+          if (page.id === currentPageId) li.classList.add("active");
+
+          // Titel en categorie (klikbaar)
+          const span = document.createElement("span");
+          span.textContent = page.title + " (" + pageCat + ")";
+          span.style.cursor = "pointer";
+          span.addEventListener("click", () => {
+            saveCurrentPage();
+            currentPageId = page.id;
+            cmEditor.setValue(page.content);
+            categoryInput.value = page.category;
+            updatePageList();
+          });
+          li.appendChild(span);
+
+          // Actieknoppen
+          const actionsDiv = document.createElement("div");
+
+          // Rename
+          const renameBtn = document.createElement("button");
+          renameBtn.textContent = "Rename";
+          renameBtn.addEventListener("click", () => {
+            let newTitle = prompt("Nieuwe titel:", page.title);
+            if (newTitle) {
+              page.title = newTitle;
+              savePages();
+              updatePageList();
+            }
+          });
+          actionsDiv.appendChild(renameBtn);
+
+          // Delete
+          const deleteBtn = document.createElement("button");
+          deleteBtn.textContent = "Delete";
+          deleteBtn.addEventListener("click", () => {
+            if (confirm("Weet je zeker dat je deze pagina wilt verwijderen?")) {
+              pages.splice(index, 1);
+              if (currentPageId === page.id) {
+                if (pages.length > 0) {
+                  currentPageId = pages[0].id;
+                  cmEditor.setValue(pages[0].content);
+                  categoryInput.value = pages[0].category;
+                } else {
+                  currentPageId = null;
+                  cmEditor.setValue("");
+                  categoryInput.value = "";
+                }
+              }
+              savePages();
+              updatePageList();
+            }
+          });
+          actionsDiv.appendChild(deleteBtn);
+
+          // Up (herordenen)
+          const upBtn = document.createElement("button");
+          upBtn.textContent = "Up";
+          upBtn.addEventListener("click", () => {
+            if (index > 0) {
+              [pages[index], pages[index - 1]] = [
+                pages[index - 1],
+                pages[index],
+              ];
+              savePages();
+              updatePageList();
+            }
+          });
+          actionsDiv.appendChild(upBtn);
+
+          // Down (herordenen)
+          const downBtn = document.createElement("button");
+          downBtn.textContent = "Down";
+          downBtn.addEventListener("click", () => {
+            if (index < pages.length - 1) {
+              [pages[index], pages[index + 1]] = [
+                pages[index + 1],
+                pages[index],
+              ];
+              savePages();
+              updatePageList();
+            }
+          });
+          actionsDiv.appendChild(downBtn);
+
+          li.appendChild(actionsDiv);
+          pageList.appendChild(li);
+        });
+      }
+
+      // Eventlistener op de filter-selectie
+      filterSelect.addEventListener("change", updatePageList);
+
+      // Nieuwe pagina aanmaken
+      document.getElementById("newPage").addEventListener("click", () => {
+        saveCurrentPage();
+        let title = prompt("Geef de titel van de nieuwe pagina op:");
+        if (title) {
+          if (pages.find((p) => p.title === title)) {
+            alert("Een pagina met deze titel bestaat al!");
+          } else {
+            const newPage = {
+              id: Date.now() + Math.random(),
+              title: title,
+              content: "",
+              category: "",
+            };
+            pages.push(newPage);
+            currentPageId = newPage.id;
+            cmEditor.setValue("");
+            categoryInput.value = "";
+            updatePageList();
+            savePages();
+          }
+        }
+      });
+
+      // Upload pagina's: Trigger file select
+      document
+        .getElementById("uploadPagesBtn")
+        .addEventListener("click", () => {
+          document.getElementById("uploadPagesInput").click();
+        });
+
+      // Verwerk de geselecteerde bestanden
+      document
+        .getElementById("uploadPagesInput")
+        .addEventListener("change", (event) => {
+          const files = event.target.files;
+          if (!files.length) return;
+          Array.from(files).forEach((file) => {
+            const reader = new FileReader();
+            reader.onload = function (e) {
+              let content = e.target.result;
+              // Bepaal de titel: gebruik de bestandsnaam zonder .md-extensie
+              let title = file.name.replace(/\.md$/i, "");
+              // Als de titel al bestaat, pas hem dan aan
+              let originalTitle = title;
+              let counter = 1;
+              while (pages.find((p) => p.title === title)) {
+                title = originalTitle + "_" + counter;
+                counter++;
+              }
+              const newPage = {
+                id: Date.now() + Math.random(),
+                title: title,
+                content: content,
+                category: "",
+              };
+              pages.push(newPage);
+              // Als er nog geen actieve pagina is, selecteer deze dan
+              if (!currentPageId) {
+                currentPageId = newPage.id;
+                cmEditor.setValue(newPage.content);
+                categoryInput.value = newPage.category;
+              }
+              savePages();
+              updatePageList();
+            };
+            reader.readAsText(file);
+          });
+          // Reset de file input zodat dezelfde bestanden later opnieuw gekozen kunnen worden
+          event.target.value = "";
+        });
+
+      // Wisselen tussen bewerken en voorbeeldmodus
+      document.getElementById("editMode").addEventListener("click", () => {
+        previewDiv.style.display = "none";
+        document.getElementById("editorContainer").style.display = "block";
+        cmEditor.refresh();
+      });
+
+      document.getElementById("previewMode").addEventListener("click", () => {
+        saveCurrentPage();
+        const content = cmEditor.getValue();
+        previewDiv.innerHTML = marked.parse(content);
+        previewDiv.style.display = "block";
+        document.getElementById("editorContainer").style.display = "none";
+        hljs.highlightAll();
+      });
+
+      // Download de huidige pagina als markdown-bestand
+      document.getElementById("download").addEventListener("click", () => {
+        saveCurrentPage();
+        const page = pages.find((p) => p.id === currentPageId);
+        if (page) {
+          const blob = new Blob([page.content], { type: "text/markdown" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = page.title + ".md";
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      });
+
+      // Download alle pagina's als ZIP-bestand
+      document.getElementById("downloadAll").addEventListener("click", () => {
+        saveCurrentPage();
+        const zip = new JSZip();
+        pages.forEach((page) => {
+          const fileName = page.title + ".md";
+          const cat = page.category.trim();
+          if (cat) {
+            let folder = zip.folder(cat);
+            folder.file(fileName, page.content);
+          } else {
+            zip.file(fileName, page.content);
+          }
+        });
+        zip.generateAsync({ type: "blob" }).then(function (content) {
+          const url = URL.createObjectURL(content);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "pages.zip";
+          a.click();
+          URL.revokeObjectURL(url);
+        });
+      });
+
+      // Automatisch opslaan tijdens het typen in CodeMirror
+      cmEditor.on("change", () => {
+        saveCurrentPage();
+      });
+
+      // Initialisatie: laad de eerste pagina (of maak een standaard aan)
+      if (pages.length > 0) {
+        currentPageId = pages[0].id;
+        cmEditor.setValue(pages[0].content);
+        categoryInput.value = pages[0].category;
+      } else {
+        // Maak een standaardpagina aan
+        currentPageId = Date.now() + Math.random();
+        const defaultPage = {
+          id: currentPageId,
+          title: "Untitled",
+          content: "",
+          category: "",
+        };
+        pages.push(defaultPage);
+        savePages();
+      }
+      updatePageList();
+    </script>
+  </body>
+</html>
